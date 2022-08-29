@@ -566,14 +566,14 @@ MODEL_CONFIG = {
     },
     "v2.1": {
         "models": [
-            "resnet", "ssd-resnext50", "rnnt",
+            "resnet", "retinanet", "rnnt",
             "bert-99", "bert-99.9",
             "dlrm-99", "dlrm-99.9",
             "3d-unet-99", "3d-unet-99.9",
         ],
         "required-scenarios-datacenter": {
             "resnet": ["Server", "Offline"],
-            "ssd-resnext50": ["Server", "Offline"],
+            "retinanet": ["Server", "Offline"],
             "rnnt": ["Server", "Offline"],
             "bert-99": ["Server", "Offline"],
             "bert-99.9": ["Server", "Offline"],
@@ -586,7 +586,7 @@ MODEL_CONFIG = {
         },
         "required-scenarios-edge": {
             "resnet": ["SingleStream", "MultiStream", "Offline"],
-            "ssd-resnext50": ["SingleStream", "MultiStream", "Offline"],
+            "retinanet": ["SingleStream", "MultiStream", "Offline"],
             "rnnt": ["SingleStream", "Offline"],
             "bert-99": ["SingleStream", "Offline"],
             "3d-unet-99": ["SingleStream", "Offline"],
@@ -596,7 +596,7 @@ MODEL_CONFIG = {
         },
         "required-scenarios-datacenter-edge": {
             "resnet": ["SingleStream", "Offline", "MultiStream", "Server"],
-            "ssd-resnext50": ["SingleStream", "Offline", "MultiStream", "Server"],
+            "retinanet": ["SingleStream", "Offline", "MultiStream", "Server"],
             "rnnt": ["SingleStream", "Offline", "Server"],
             "bert-99": ["SingleStream", "Offline", "Server"],
             "bert-99.9": ["Offline", "Server"],
@@ -609,8 +609,7 @@ MODEL_CONFIG = {
         },
         "accuracy-target": {
             "resnet": ("acc", 76.46 * 0.99),
-            # TODO: Update accuracy target for ssd-resnext50
-            "ssd-resnext50": ("mAP", 37.5 * 0.99),
+            "retinanet": ("mAP", 37.55 * 0.99),
             "rnnt": ("WER", (100 - 7.452) * 0.99),
             "bert-99": ("F1", 90.874 * 0.99),
             "bert-99.9": ("F1", 90.874 * 0.999),
@@ -621,8 +620,8 @@ MODEL_CONFIG = {
         },
         "performance-sample-count": {
             "resnet": 1024,
-            # TODO: Update perf sample count for ssd-resnext50
-            "ssd-resnext50": 64,
+            # TODO: Update perf sample count for retinanet
+            "retinanet": 64,
             "rnnt": 2513,
             "bert-99": 10833,
             "bert-99.9": 10833,
@@ -656,11 +655,10 @@ MODEL_CONFIG = {
             "ssd_resnet50_v1_fpn_640x640": "ssd-small",
             "ssd_resnet50_v1_fpn_1024x1024": "ssd-large",
         },
-        # TODO: Update with the real v2.1 seeds.
         "seeds": {
-            "qsl_rng_seed": 6655344265603136530,
-            "sample_index_rng_seed": 15863379492028895792,
-            "schedule_rng_seed": 12662793979680847247,
+            "qsl_rng_seed": 14284205019438841327,
+            "sample_index_rng_seed": 4163916728725999944,
+            "schedule_rng_seed": 299063814864929621,
         },
         "test05_seeds": {
             "qsl_rng_seed" : 313588358309856706,
@@ -671,7 +669,7 @@ MODEL_CONFIG = {
         ],
         "latency-constraint": {
             "resnet": {"Server": 15000000},
-            "ssd-resnext50": {"Server": 100000000},
+            "retinanet": {"Server": 100000000},
             "rnnt": {"Server": 1000000000},
             "bert-99": {"Server": 130000000},
             "bert-99.9": {"Server": 130000000},
@@ -680,7 +678,7 @@ MODEL_CONFIG = {
         },
         "min-queries": {
             "resnet": {"SingleStream": 1024, "MultiStream": 270336, "Server": 270336, "Offline": 1},
-            "ssd-resnext50": {"SingleStream": 1024, "MultiStream": 270336, "Server": 270336, "Offline": 1},
+            "retinanet": {"SingleStream": 1024, "MultiStream": 270336, "Server": 270336, "Offline": 1},
             "rnnt": {"SingleStream": 1024, "Server": 270336, "Offline": 1},
             "bert-99": {"SingleStream": 1024, "Server": 270336, "Offline": 1},
             "bert-99.9": {"SingleStream": 1024, "Server": 270336, "Offline": 1},
@@ -881,6 +879,10 @@ class Config():
       model = "resnet"
     elif "rcnn" in model:
       model = "ssd-small"
+    elif "bert-99.9" in model:
+      model = "bert-99.9"
+    elif "bert-99" in model:
+      model = "bert-99"
     # map again, for example v0.7 does not have mobilenet so it needs to be mapped to resnet
     mlperf_model = self.base["model_mapping"].get(model, model)
     return mlperf_model
@@ -1340,17 +1342,8 @@ def files_diff(list1, list2, optional=None):
   """returns a list of files that are missing or added."""
   if not optional:
     optional = []
-  if list1 and list2:
-    for i in ["mlperf_log_trace.json", "results.json"] + optional:
-      try:
-        list1.remove(i)
-      except:
-        pass
-    if len(list1) > len(list2):
-      return list(set(list1) - set(list2))
-    else:
-      return list(set(list2) - set(list1))
-  return []
+  optional = optional + ["mlperf_log_trace.json", "results.json", ".gitkeep"]
+  return set(list1).symmetric_difference(set(list2)) - set(optional)
 
 def is_system_over_network(division, system_json, path):
   """
@@ -1429,7 +1422,8 @@ def check_results_dir(config, filter_submitter,  skip_compliance, csv, debug=Fal
 
     notes = system_json.get("hw_notes", "")
     if system_json.get("sw_notes"):
-      notes = notes + ". " + system_json.get("sw_notes")
+      notes = notes + ". " if notes else ""
+      notes = notes + system_json.get("sw_notes")
     unit_dict = {
         "SingleStream": "Latency (ms)",
         "MultiStream": "Latency (ms)",
@@ -1666,7 +1660,7 @@ def check_results_dir(config, filter_submitter,  skip_compliance, csv, debug=Fal
             compliance = 0 if is_closed_or_network else 1
             if is_closed_or_network and not skip_compliance:
               compliance_dir = os.path.join(division, submitter, "compliance",
-                                            system_desc, model_name, scenario_fixed)
+                                            system_desc, model_name, scenario)
               if not os.path.exists(compliance_dir):
                 log.error("no compliance dir for %s", name)
                 results[name] = None
@@ -1801,13 +1795,16 @@ def check_compliance_perf_dir(test_dir):
       log.error("%s has no performance/run_1 directory", test_dir)
       is_valid = False
     else:
-      diff = files_diff(list_files(test_perf_path), REQUIRED_COMP_PER_FILES)
+      diff = files_diff(
+          list_files(test_perf_path), REQUIRED_COMP_PER_FILES,
+          ["mlperf_log_accuracy.json"])
       if diff:
-        log.info("%s has file list mismatch (%s)", test_perf_path, diff)
+        log.error("%s has file list mismatch (%s)", test_perf_path, diff)
+        is_valid = False
 
   return is_valid
 
-def check_compliance_acc_dir(test_dir):
+def check_compliance_acc_dir(test_dir, model, config):
   is_valid = False
   acc_passed = False
 
@@ -1824,7 +1821,7 @@ def check_compliance_acc_dir(test_dir):
           acc_passed = True
           break
     if acc_passed == False:
-      log.info("Compliance test accuracy check in %s failed", test_dir)
+      log.info("Compliance test accuracy check (deterministic mode) in %s failed", test_dir)
 
     # Check Accuracy dir
     test_acc_path = os.path.join(test_dir, "accuracy")
@@ -1834,8 +1831,37 @@ def check_compliance_acc_dir(test_dir):
     else:
       diff = files_diff(list_files(test_acc_path), REQUIRED_TEST01_ACC_FILES_1 if acc_passed else REQUIRED_TEST01_ACC_FILES)
       if diff:
-        log.info("%s has file list mismatch (%s)", test_acc_path, diff)
+        log.error("%s has file list mismatch (%s)", test_acc_path, diff)
         is_valid = False
+      elif not acc_passed:
+        acc_type, acc_target = config.get_accuracy_target(model)
+        pattern = ACC_PATTERN[acc_type]
+        more_accurate = model.find("99.9")
+        if more_accurate == -1:
+          required_delta_perc = 1
+        else:
+          required_delta_perc = 0.1
+        acc_baseline = acc_compliance = 0
+        with open(os.path.join(test_acc_path, "baseline_accuracy.txt"), "r", encoding="utf-8") as f:
+          for line in f:
+            m = re.match(pattern, line)
+            if m:
+              acc_baseline = float(m.group(1))
+        with open(os.path.join(test_acc_path, "compliance_accuracy.txt"), "r", encoding="utf-8") as f:
+          for line in f:
+            m = re.match(pattern, line)
+            if m:
+              acc_compliance = float(m.group(1))
+        if acc_baseline == 0 or acc_compliance == 0:
+          is_valid = False
+        else:
+          delta_perc = abs(1 - acc_baseline / acc_compliance) * 100
+          if delta_perc <= required_delta_perc:
+            is_valid = True
+            log.info("Compliance test accuracy check in %s passed in non-deterministic mode", test_dir)
+          else:
+            is_valid = False
+            log.error("Compliance test accuracy check in %s failed in non-deterministic mode also", test_dir)
 
   return is_valid
 
@@ -1845,7 +1871,7 @@ def check_compliance_dir(compliance_dir, model, scenario, config, division, syst
   compliance_acc_pass = True
   test_list = ["TEST01", "TEST04", "TEST05"]
 
-  if model in ["rnnt", "bert-99", "bert-99.9", "dlrm-99", "dlrm-99.9", "3d-unet-99", "3d-unet-99.9"]:
+  if model in ["rnnt", "bert-99", "bert-99.9", "dlrm-99", "dlrm-99.9", "3d-unet-99", "3d-unet-99.9", "retinanet"]:
     test_list.remove("TEST04")
 
   #Check performance of all Tests
@@ -1868,7 +1894,7 @@ def check_compliance_dir(compliance_dir, model, scenario, config, division, syst
 
 
   #Check accuracy for TEST01
-  compliance_acc_pass = check_compliance_acc_dir(os.path.join(compliance_dir, "TEST01"))
+  compliance_acc_pass = check_compliance_acc_dir(os.path.join(compliance_dir, "TEST01"), model, config)
 
   return compliance_perf_pass and compliance_acc_pass and compliance_perf_dir_pass
 
