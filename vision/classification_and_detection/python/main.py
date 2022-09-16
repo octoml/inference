@@ -472,7 +472,10 @@ def main():
                         image_format=image_format,
                         pre_process=pre_proc,
                         use_cache=args.cache,
-                        count=count, cache_dir=args.cache_dir, **kwargs)
+                        count=count,
+                        cache_dir=args.cache_dir,
+                        threads=args.threads,
+                        **kwargs)
     # load model to backend
     model = backend.load(args.model, inputs=args.inputs, outputs=args.outputs)
     final_results = {
