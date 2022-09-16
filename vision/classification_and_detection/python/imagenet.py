@@ -52,6 +52,7 @@ class Imagenet(dataset.Dataset):
         with open(image_list, 'r') as fp:
             for count, line in enumerate(fp):
                 pass
+        count = count + 1
         CNT = count if count <= self.count else self.count
         if N > CNT:
             N = CNT
@@ -59,16 +60,24 @@ class Imagenet(dataset.Dataset):
 
         with open(image_list, 'r') as f:
             lists = []
+            image_lists = []
+            label_lists = []
             for i in range(N):
                 lists.append([ next(f) for x in range(int(CNT/N)) ])
-            lists.append([ next(f) for x in range(int(CNT%N)) ])
+                image_lists.append([])
+                label_lists.append([])
+            if int(CNT%N) > 0:
+                lists.append([ next(f) for x in range(int(CNT%N)) ])
+                image_lists.append([])
+                label_lists.append([])
         executor = concurrent.futures.ThreadPoolExecutor(N)
-        futures = [executor.submit(self.process, data_path, int(CNT/N), lists.index(item), item) for item in lists]
+        futures = [executor.submit(self.process, data_path, item, image_lists[lists.index(item)],
+            label_lists[lists.index(item)]) for item in lists]
         concurrent.futures.wait(futures)
-
+        for i in range (len(image_lists)):
+            self.image_list += image_lists[i]
+            self.label_list += label_lists[i]
         time_taken = time.time() - start
-        log.info("loaded {} images, cache={}, took={:.1f}sec".format(
-            len(self.image_list), use_cache, time_taken))
         if not self.image_list:
             log.error("no images in image list found")
             raise ValueError("no images in image list found")
@@ -77,17 +86,13 @@ class Imagenet(dataset.Dataset):
 
         log.info("loaded {} images, cache={}, took={:.1f}sec".format(
             len(self.image_list), use_cache, time_taken))
-
         self.label_list = np.array(self.label_list)
 
-    def process(self, data_path, size, pos, files):
-        cnt = 0
-        index = pos*size
+    def process(self, data_path, files, image_list, label_list):
         for s in files:
             image_name, label = re.split(r"\s+", s.strip())
             src = os.path.join(data_path, image_name)
             if not os.path.exists(src):
-                print(src)
                 # if the image does not exists ignore it
                 self.not_found += 1
                 continue
@@ -99,9 +104,8 @@ class Imagenet(dataset.Dataset):
                 img_org = cv2.imread(src)
                 processed = self.pre_process(img_org, need_transpose=self.need_transpose, dims=self.image_size)
                 np.save(dst, processed)
-            self.image_list.insert(index+cnt, image_name)
-            self.label_list.insert(index+cnt, int(label))
-            cnt = cnt + 1
+            image_list.append(image_name)
+            label_list.append(int(label))
 
             # limit the dataset if requested
             if self.count and len(self.image_list) >= self.count:
