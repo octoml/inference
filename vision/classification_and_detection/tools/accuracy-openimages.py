@@ -11,6 +11,7 @@ from __future__ import unicode_literals
 import argparse
 import json
 import os
+import concurrent.futures
 
 import numpy as np
 
@@ -30,6 +31,65 @@ def get_args():
     args = parser.parse_args()
     return args
 
+def process_results(results, image_map, args, cocoGt):
+  detections = []
+  image_map = cocoGt.dataset["images"]
+  image_ids = set()
+  seen = set()
+  no_results = 0
+  count = 0
+  for j in results:
+    idx = j['qsl_idx']
+    # de-dupe in case loadgen sends the same image multiple times
+    if idx in seen:
+        continue
+    seen.add(idx)
+
+    # reconstruct from mlperf accuracy log
+    # what is written by the benchmark is an array of float32's:
+    # id, box[0], box[1], box[2], box[3], score, detection_class
+    # note that id is a index into instances_val2017.json, not the actual image_id
+    data = np.frombuffer(bytes.fromhex(j['data']), np.float32)
+    if len(data) < 7:
+        # handle images that had no results
+        image = image_map[idx]
+        # by adding the id to image_ids we make pycoco aware of the no-result image
+        image_ids.add(image["id"])
+        no_results += 1
+        if args.verbose:
+            print("no results: {}, idx={}".format(image["coco_url"], idx))
+        continue
+
+    for i in range(0, len(data), 7):
+        image_idx, ymin, xmin, ymax, xmax, score, label = data[i:i + 7]
+        image = image_map[idx]
+        image_idx = int(image_idx)
+        if image_idx != idx:
+            print("ERROR: loadgen({}) and payload({}) disagree on image_idx".format(idx, image_idx))
+        image_id = image["id"]
+        height, width = image["height"], image["width"]
+        ymin *= height
+        xmin *= width
+        ymax *= height
+        xmax *= width
+        loc = os.path.join(args.openimages_dir, "validation/data", image["file_name"])
+        label = int(label)
+        if args.use_inv_map:
+            label = inv_map[label]
+        # pycoco wants {imageID,x1,y1,w,h,score,class}
+        detections.append({
+            "image_id": image_id,
+            "image_loc": loc,
+            "category_id": label,
+            "bbox": [float(xmin), float(ymin), float(xmax - xmin), float(ymax - ymin)],
+            "score": float(score)})
+        image_ids.add(image_id)
+  cocoDt = cocoGt.loadRes(detections)
+  cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox')
+  cocoEval.params.imgIds = list(image_ids)
+  cocoEval.evaluate()
+  return cocoEval
+
 
 def main():
     args = get_args()
@@ -43,65 +103,27 @@ def main():
         results = json.load(f)
 
     detections = []
-    image_ids = set()
-    seen = set()
-    no_results = 0
-    image_map = cocoGt.dataset["images"]
+    N = 4
+    CNT = len(results)
+    results_list = []
+    cocoevals_list = []
+    lists = []
+    for i in range (N):
+        lists.append([ results[x] for x in range(i*int(CNT/N) , (i+1)* int(CNT/N)) ])
+        results_list.append([])
+        imageids_list.append(set())
+        cocoevals_list.append(None)
 
-    for j in results:
-        idx = j['qsl_idx']
-        # de-dupe in case loadgen sends the same image multiple times
-        if idx in seen:
-            continue
-        seen.add(idx)
-
-        # reconstruct from mlperf accuracy log
-        # what is written by the benchmark is an array of float32's:
-        # id, box[0], box[1], box[2], box[3], score, detection_class
-        # note that id is a index into instances_val2017.json, not the actual image_id
-        data = np.frombuffer(bytes.fromhex(j['data']), np.float32)
-        if len(data) < 7:
-            # handle images that had no results
-            image = image_map[idx]
-            # by adding the id to image_ids we make pycoco aware of the no-result image
-            image_ids.add(image["id"])
-            no_results += 1
-            if args.verbose:
-                print("no results: {}, idx={}".format(image["coco_url"], idx))
-            continue
-
-        for i in range(0, len(data), 7):
-            image_idx, ymin, xmin, ymax, xmax, score, label = data[i:i + 7]
-            image = image_map[idx]
-            image_idx = int(image_idx)
-            if image_idx != idx:
-                print("ERROR: loadgen({}) and payload({}) disagree on image_idx".format(idx, image_idx))
-            image_id = image["id"]
-            height, width = image["height"], image["width"]
-            ymin *= height
-            xmin *= width
-            ymax *= height
-            xmax *= width
-            loc = os.path.join(args.openimages_dir, "validation/data", image["file_name"])
-            label = int(label)
-            if args.use_inv_map:
-                label = inv_map[label]
-            # pycoco wants {imageID,x1,y1,w,h,score,class}
-            detections.append({
-                "image_id": image_id,
-                "image_loc": loc,
-                "category_id": label,
-                "bbox": [float(xmin), float(ymin), float(xmax - xmin), float(ymax - ymin)],
-                "score": float(score)})
-            image_ids.add(image_id)
-
-    with open(args.output_file, "w") as fp:
-        json.dump(detections, fp, sort_keys=True, indent=4)
-
-    cocoDt = cocoGt.loadRes(args.output_file) # Load from file to bypass error with Python3
-    cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox')
-    cocoEval.params.imgIds = list(image_ids)
-    cocoEval.evaluate()
+    executor = concurrent.futures.ProcessPoolExecutor(N)
+    futures = [executor.submit(process_results, lists[x],
+        args, cocoGt) for x in range(len(lists))]
+    concurrent.futures.wait(futures)
+    for future in futures:
+        cocoevals_list.append(future.result())
+    cocoEval = cocoevals_list[0]
+    for i in range (1,len(cocoevals_list)):
+        cocoEval.evalImgs += cocoevals_list[i].evalImgs
+     
     cocoEval.accumulate()
     cocoEval.summarize()
 
