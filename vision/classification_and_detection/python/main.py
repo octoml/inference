@@ -288,9 +288,6 @@ def get_backend(backend):
         # Experimental
         from backend_tvm_1 import BackendTVM1
         backend = BackendTVM1()
-    elif backend == "octomizer":
-        from backend_octomizer import BackendOctomizer
-        backend = BackendOctomizer()
     elif backend == "null":
         from backend_null import BackendNull
         backend = BackendNull()
