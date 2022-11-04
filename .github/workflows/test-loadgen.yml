@@ -31,11 +31,11 @@ jobs:
     - name: Install dependencies
       run: |
         python3 -m pip install cmind
-        cm pull repo mlcommons@ck --checkout=${{ github.event.pull_request.head.sha }}
+        cm pull repo mlcommons@ck
     - name: Dump GitHub context
       env:
         GITHUB_CONTEXT: ${{ toJson(github) }}
       run: echo "$GITHUB_CONTEXT"
     - name: Test Loadgen
       run: |
-        cm run script --tags=get,mlperf,inference,loadgen --quiet
+        cm run script --tags=get,mlperf,inference,loadgen --quiet --version=custom --env.CM_GIT_CHECKOUT=${{ github.event.pull_request.head.sha }} --env.CM_GIT_URL=${{ github.event.pull_request.head.repo.html_url }}
