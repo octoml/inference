@@ -10,6 +10,8 @@ on:
       - loadgen/**
       - .github/workflows/test-loadgen.yml
       - '!**.md'
+  push:
+    branches: [ "master", "dev" ]
 
 jobs:
   build:
@@ -29,7 +31,11 @@ jobs:
     - name: Install dependencies
       run: |
         python3 -m pip install cmind
-        cm pull repo mlcommons@ck
+        cm pull repo mlcommons@ck --checkout=${{ github.event.pull_request.head.sha }}
+    - name: Dump GitHub context
+      env:
+        GITHUB_CONTEXT: ${{ toJson(github) }}
+      run: echo "$GITHUB_CONTEXT"
     - name: Test Loadgen
       run: |
         cm run script --tags=get,mlperf,inference,loadgen --quiet
