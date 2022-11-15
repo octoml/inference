@@ -7,8 +7,9 @@ on:
   pull_request:
     branches: [ "master", "dev" ]
     paths:
-      - loadgen/**
-      - .github/workflows/test-loadgen.yml
+      - vision/classification_and_detection/**
+      - tools/submission/**
+      - .github/workflows/test-retinanet.yml
       - '!**.md'
 
 jobs:
@@ -18,7 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: [ "3.10" ]
+        backend: [ "onnxruntime" ]
 
     steps:
     - uses: actions/checkout@v3
@@ -30,6 +32,7 @@ jobs:
       run: |
         python3 -m pip install cmind
         cm pull repo mlcommons@ck
-    - name: Test Loadgen
+        cm run script --quiet --tags=get,sys-utils-cm
+    - name: Test Retinanet and end to end submission generation
       run: |
-        cm run script --tags=get,mlperf,inference,loadgen --quiet --version=custom --env.CM_GIT_CHECKOUT=${{ github.event.pull_request.head.ref }} --env.CM_GIT_URL=${{ github.event.pull_request.head.repo.html_url }}
+        cm run script --tags=run,mlperf,inference,generate-run-cmds,_submission,_short --quiet --submitter="MLCommons" --hw_name=default --model=retinanet --lang=python --backend=${{ matrix.backend }} --device=cpu --scenario=Offline --test_query_count=50 --adr.compiler.tags=gcc --adr.openimages-preprocessed,tags=_500 --adr.inference-src.env.CM_GIT_CHECKOUT=${{ github.event.pull_request.head.ref }} --adr.inference-src.env.CM_GIT_URL=${{ github.event.pull_request.head.repo.html_url }}
